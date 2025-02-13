@@ -2,8 +2,7 @@ import dotenv from 'dotenv'
 import http from 'node:http'
 import crypto from 'crypto'
 import querystring from 'querystring'
-
-import URLSearchParams from 'node:url'
+import jwt from 'jsonwebtoken'
 
 const env = dotenv.config()
 if (env.error) {
@@ -13,12 +12,37 @@ if (env.error) {
 const clientId = env.parsed.CLIENT_ID
 const clientSecret = env.parsed.CLIENT_SECRET
 const redirectUri = env.parsed.REDIRECT_URI
+const jwtSecret = env.parsed.JWT_SECRET
 
-let token = null
-let state = null
+// TODO Store tokens in object with jwt as key and token as value
+let sessions = []
 
-const handleLogin = (req, res) => {
-	state = crypto.randomBytes(16).toString('hex').slice(0, 16)
+function generateAccessToken(state) {
+	return jwt.sign({ state }, jwtSecret, { expiresIn: '1800s' })
+}
+
+function getSessionByParam(param, value) {
+	return sessions.find((session) => session[param] === value)
+}
+
+function getSession(req) {
+	const cookie = req.headers.cookie
+	const cookieSplit = cookie.split('=')
+	// Getting value of cookie (key=value)
+	return (cookieSplit.length > 1) ? getSessionByParam('jwt', cookieSplit[1]) : null
+}
+
+function addSession(stateToAdd){
+	const existingSession = sessions.find((session) => session.state === stateToAdd)
+	if (existingSession === undefined){
+		sessions.push({state: stateToAdd, jwt: null, token: null})
+	}
+}
+
+const handleLogin = (_, res) => {
+	const state = crypto.randomBytes(16).toString('hex').slice(0, 16)
+	addSession(state)
+
 	const scope = 'user-read-private user-read-email'
 
 	const params = new URLSearchParams({
@@ -67,11 +91,15 @@ const handleGetToken = async (req, res) => {
 		return
 	}
 
-	if (queryParams.state !== state) {
-		res.writeHead(400, `Invalid state: ${queryParams.state}`)
+	const session = getSessionByParam('state', queryParams.state)
+	if (session === undefined){
+		res.writeHead(400, `Invalid state ${queryParams.state}`)
 		res.end()
 		return
 	}
+
+	const cookie = generateAccessToken(session.state)
+	session.jwt = cookie
 
 	const authOptions = {
 		method: 'POST',
@@ -105,18 +133,27 @@ const handleGetToken = async (req, res) => {
 		return
 	}
 
-	token = tokenJson.access_token
-	console.log(token)
+	session.token = tokenJson.access_token
 	res.writeHead(301, {
 		Location: 'http://localhost:5173/profile',
+		// Try same site lax if this doesn't work (it'll send cookie when navigating to frontend from other site (like redirecting in handleGetToken))
+		'Set-Cookie': `jwt=${cookie}; Secure; HttpOnly; SameSite=Strict`, // TODO find max-age of token we are getting from spotify and set here as well
 	})
 	res.end()
 }
 
 const handleGetProfile = async (req, res) => {
+	const session = getSession(req)
+
+	if (session === null || session === undefined) {
+		res.writeHead(400, `Invalid cookie ${req.headers.cookie}`)
+		res.end()
+		return
+	}
+
 	const result = await fetch('https://api.spotify.com/v1/me', {
 		method: 'GET',
-		headers: { Authorization: `Bearer ${token}` },
+		headers: { Authorization: `Bearer ${session.token}` },
 	})
 
 	if (!result.ok) {
@@ -136,15 +173,17 @@ const handleGetProfile = async (req, res) => {
 
 // TODO Filter doamins so only react app and spotify api can send requests here
 const requestHandler = (req, res) => {
-	res.setHeader('Access-Control-Allow-Origin', '*')
+	res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173')
 	res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE')
 	res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+	res.setHeader('Access-Control-Allow-Credentials', 'true')
 
 	if (req.method === 'OPTIONS') {
 		res.writeHead(204)
 		res.end()
 		return
 	}
+
 	// TODO add try-catch to all async handlers
 	switch (req.url.split('?')[0]) {
 		// TODO Add security rn anyone can call this and get info
