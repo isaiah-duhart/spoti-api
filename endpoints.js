@@ -120,6 +120,33 @@ export const getProfile = async (req, res) => {
     await callEndpoint('https://api.spotify.com/v1/me', req, res)
 }
 
+export const getPlaylist = async (req, res) => {
+	const session = getSession(req)
+	if (session === undefined){
+		res.writeHead(401, "Not authenticated, login to continue")
+		res.end()
+		return
+	}
+
+	const splitUrl = req.url.split('?')
+	if (splitUrl < 2){
+		res.writeHead(400, "Must include playlistid in query string")
+		res.end()
+		return
+	}
+
+	const queries = splitUrl[1]
+	const queryParams = querystring.parse(queries)
+
+	if (queryParams === null || queryParams.playlistId == null){
+		res.writeHead(400, "Missing playlistId query from url")
+		res.end()
+		return
+	}
+
+	await callEndpoint(`https://api.spotify.com/v1/playlists/${queryParams.playlistId}/tracks`, req, res)
+}
+
 const callEndpoint = async (url, req, res) => {
     const session = getSession(req)
 

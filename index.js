@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { login, loginCallback, getProfile, getPlaylists } from './endpoints.js'
+import { login, loginCallback, getProfile, getPlaylists, getPlaylist } from './endpoints.js'
 
 const server = http.createServer((req, res) => {
 	res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173')
@@ -15,7 +15,6 @@ const server = http.createServer((req, res) => {
 
 	// TODO add try-catch to all async handlers
 	switch (req.url.split('?')[0]) {
-		// TODO Add security rn anyone can call this and get info
 		// Called from react app only
 		case '/api/login':
 			login(req, res)
@@ -24,12 +23,14 @@ const server = http.createServer((req, res) => {
 		case '/api/loginCallback':
 			loginCallback(req, res)
 			break
-		// Need some session token (like jwt to prove that client is calling this)
 		case '/api/profile':
 			getProfile(req, res)
 			break
 		case '/api/playlists':
 			getPlaylists(req, res)
+			break
+		case '/api/playlist':
+			getPlaylist(req, res)
 			break
 		default:
 			res.writeHead(404, `Requested endpoint: ${req.url} is not suppored`)
